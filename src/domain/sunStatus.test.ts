@@ -4,7 +4,7 @@ import type { ShadowResult } from './shadow';
 
 const up = { azimuthDeg: 180, altitudeDeg: 30 };
 const free: ShadowResult = { shadowed: false };
-const blocked: ShadowResult = { shadowed: true, hit: { building: { id: 'x', footprint: [], heightM: 20 }, distanceM: 10, obstructionAngleDeg: 60 } };
+const blocked: ShadowResult = { shadowed: true, insideBuilding: false, hit: { building: { id: 'x', footprint: [], heightM: 20 }, distanceM: 10, obstructionAngleDeg: 60 } };
 const w = (cloudCover: number, dni: number | null = null) => ({ time: 0, cloudCover, directNormalIrradiance: dni });
 
 describe('evaluateStatus', () => {

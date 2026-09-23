@@ -1,14 +1,11 @@
-# Sonnenradar Karlsruhe
+# Sonnenradar
 
-Web-App-Prototyp: Wo liegt **jetzt wirklich** Sonne auf Café-Terrassen – und in den nächsten Stunden?
-Kombiniert **geometrischen Gebäudeschatten** mit **realer Bewölkung / Direktstrahlung**:
+Eine Karte wie Google Maps, die zeigt, **wo gerade wirklich Sonne ist**: Gebäudeschatten
+(aus Sonnenstand + Gebäudehöhen) kombiniert mit der **realen Bewölkung** (Open-Meteo / DWD ICON-D2).
 
-| Status | Bedeutung |
-|---|---|
-| ☀️ Sonnig | kein Gebäude verdeckt die Sonne **und** der Himmel ist klar |
-| ⛅ Schattenfrei, aber bewölkt | Sichtlinie zur Sonne frei, aber Wolken |
-| 🌑 Verschattet | ein Gebäude verdeckt die Sonne (unabhängig vom Wetter) |
-| 🌙 | Sonne unter dem Horizont |
+- **Gelb** = Sonne · **dunkel** = Gebäudeschatten · **grau** = schattenfrei, aber bewölkt
+- Zeitregler: jetzt bis +12 h, mit Sonne/Wolken-Leiste pro Stunde
+- Auf die Karte tippen → Status für genau diesen Punkt + Stundenverlauf
 
 ```bash
 npm install
@@ -17,53 +14,44 @@ npm test         # Vitest (Geometrie, Status-Logik, Parser)
 npm run build
 ```
 
+Funktioniert überall, wo die Kartenkacheln Gebäude enthalten. Startpunkt ist Karlsruhe.
+
 ## Architektur
 
 ```
 src/
   domain/      reine, getestete Logik – kein React, kein I/O
-    geo.ts         lokale Meter-Projektion (ENU) um einen Punkt
-    shadow.ts      Ray-Cast Punkt → Sonne gegen Gebäude-Prismen; Schattenpolygone fürs Rendering
-    sunStatus.ts   Kombination Sonnenstand × Schatten × Wetter → Ampel
-  services/    I/O-Adapter
-    sun.ts         SunCalc-Wrapper
-    weather.ts     Open-Meteo (cloud_cover + Direktstrahlung)
-    useForecast.ts React-Hook, 15-min-Refresh
-  data/        Cafés & (vorerst) Testgebäude
-  components/  UI: StatusCard, Timeline, ShadowPlan (2D-Draufsicht)
+    geo.ts         lokale Meter-Projektion um einen Punkt
+    shadow.ts      Ray-Cast Punkt → Sonne gegen Gebäude-Prismen; Schattenpolygone
+    sunStatus.ts   Sonnenstand × Schatten × Wetter → ☀️ / ⛅ / 🌑 / 🌙
+  map/
+    SunMap.tsx     MapLibre-Karte, Schatten-Layer, Klick
+    buildings.ts   Gebäude (Umriss + Höhe) aus den geladenen Vektorkacheln
+    shadowCanvas.ts zeichnet Sonne/Wolken-Tönung + Schatten in ein Canvas
+  services/    SunCalc, Open-Meteo, Forecast-Hook
+  components/  Info-Panel für einen Punkt, Stunden-Zeitleiste
 ```
 
 ### Entscheidungen
 
-**Schatten wird analytisch berechnet, nicht über den Renderer.**
-Die Frage „Liegt Punkt P im Schatten?“ lässt sich für Gebäude als Prismen mit Flachdach exakt
-per 2D-Ray-Cast beantworten: Strahl von P in Richtung Sonnen-Azimut, erste Kante jedes
-Gebäudes finden, Verdeckungswinkel `atan((h − 1,2 m) / d)` mit der Sonnenhöhe vergleichen.
-Das kostet Mikrosekunden pro Café und Zeitschritt, ist unit-testbar und funktioniert ohne GPU.
-Ein Status aus einer Shadow-Map (Cesium oder Three.js) auszulesen wäre dagegen umständlich
-(GPU-Readback), aufs Pixel genau begrenzt und im Test nicht deterministisch.
+- **Karte: MapLibre GL + OpenFreeMap** (kostenlos, kein API-Key). Die Vektorkacheln enthalten
+  bereits OSM-Gebäude mit `render_height`/`render_min_height`, deshalb ist kein Overpass nötig.
+  Gebäude werden als 3D-Blöcke gezeigt.
+- **Schatten werden selbst berechnet** (nicht Cesium/Three.js-Shadow-Maps): Jeder Gebäudeumriss
+  wird entlang des Schattenvektors `h / tan(Sonnenhöhe)` verschoben. Die Flächen werden in ein
+  Canvas gezeichnet, das als eigener Layer **unter** den 3D-Gebäuden liegt. Der Klick-Status
+  nutzt dieselbe Geometrie per Ray-Cast, deshalb stimmen Karte und Ampel immer überein.
+- **Wetter: Open-Meteo „best_match“** = in Deutschland DWD ICON-D2 (2 km). Abgefragt wird für die
+  Kartenmitte, neu geladen nach ~2 km Verschiebung oder 15 min.
+- **„Sonne“ = Direktstrahlung ≥ 120 W/m²** (WMO-Definition der Sonnenscheindauer). Das ist
+  besser als die bloße Bewölkung, weil dünne Cirren oft trotzdem Sonne durchlassen. Fallback ist
+  Bewölkung ≤ 40 %.
 
-**3D-Ansicht: MapLibre GL statt CesiumJS/Three.js (Meilenstein 4).**
-- *CesiumJS*: Schatten sind eingebaut, aber das Bundle ist mehrere MB groß. Die gut aussehenden
-  „OSM Buildings“ gibt es nur mit Cesium-Ion-Token. Es rechnet eigene Schatten, die von unserer
-  Statuslogik abweichen können. Zu schwer für den Nutzen.
-- *Three.js*: Man müsste Kartenkacheln, Kamera und Georeferenzierung selbst bauen.
-- *MapLibre GL* (+ freie Kacheln, z. B. OpenFreeMap): `fill-extrusion` liefert 2,5D-Gebäude
-  aus unseren OSM-Daten, die Schattenpolygone aus `shadow.ts` liegen als GeoJSON-Layer darauf.
-  Karte und Status nutzen **dieselbe** Geometrie und können nicht auseinanderlaufen.
+### Bekannte Grenzen
 
-**Wetter: Open-Meteo, Modell „best_match“.** Für Deutschland stammt das in den ersten ~2 Tagen
-bereits aus **DWD ICON-D2** (2 km). Eine eigene DWD-Anbindung (GRIB) bringt also keinen
-Präzisionsgewinn. Kein API-Key, CORS-fähig.
-
-**„Sonnig“ = Direktstrahlung ≥ 120 W/m² (WMO-Definition der Sonnenscheindauer).**
-Die Gesamtbewölkung allein ist irreführend: 80 % dünne Cirren lassen oft klare Schatten zu.
-Liefert die Quelle keine Strahlung, greift der Fallback „Bewölkung ≤ 40 %“.
-
-## Roadmap
-
-1. ✅ Ein Café, Testgebäude, SunCalc, Open-Meteo, Ampel, Stundenzeitleiste, 2D-Draufsicht
-2. 10–20 echte Cafés (kuratierte Liste, Terrassen-Koordinaten) + OSM-Gebäude via Overpass
-   (`height` → `building:levels × 3 m + Dach` → Default 12 m), als statisches GeoJSON gecacht
-3. Übersichtsliste / Karte aller Cafés mit Zeitleiste
-4. MapLibre-2,5D-Karte mit Gebäude-Extrusion und Schattenlayer
+- Gebäudehöhen: Fehlen in OSM Höhe und Stockwerke, nehmen die Kacheln 5 m an. In der Innenstadt
+  ist das oft zu niedrig. Eine mögliche Verbesserung sind die amtlichen LoD2-Gebäudemodelle
+  (in BW frei verfügbar).
+- Nur Boden-Schatten (keine Schatten auf Dächern), kein Gelände, keine Bäume.
+- Schatten erst ab Zoom 15 (vorher sind nicht alle Gebäude in den Kacheln).
+- Bewölkung ist ein Wert für den ganzen Kartenausschnitt (Modellraster 2 km).

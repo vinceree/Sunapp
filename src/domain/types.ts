@@ -7,13 +7,8 @@ export type Building = {
   /** Closed or open outer ring; the last vertex need not repeat the first. */
   footprint: LatLng[];
   heightM: number;
-};
-
-export type Cafe = {
-  id: string;
-  name: string;
-  /** Position of the terrace / outdoor seating, not the building entrance. */
-  terrace: LatLng;
+  /** Height of the underside, e.g. for passages or overhanging building parts. */
+  minHeightM?: number;
 };
 
 export type SunPosition = {

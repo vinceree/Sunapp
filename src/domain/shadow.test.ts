@@ -49,6 +49,20 @@ describe('computeShadow', () => {
     expect(r.shadowed && r.hit.building.id).toBe('tall');
   });
 
+  it('detects points inside a building footprint', () => {
+    const r = computeShadow(origin, [box(-5, -5, 5, 5, 10)], { azimuthDeg: 90, altitudeDeg: 60 });
+    expect(r.shadowed && r.insideBuilding).toBe(true);
+  });
+
+  it('lets the sun through below an elevated building part (passage)', () => {
+    // Bridge 20 m south, from 8 m to 12 m height, 20 m deep.
+    const bridge = { ...box(-10, -40, 10, -20, 12), minHeightM: 8 };
+    // Ray height over the bridge at 10°: 1.2 + [20..40]·tan10° = 4.7..8.3 m → grazes the underside.
+    expect(computeShadow(origin, [bridge], { azimuthDeg: 180, altitudeDeg: 10 }).shadowed).toBe(true);
+    // At 5°: 2.9..4.7 m → passes underneath.
+    expect(computeShadow(origin, [bridge], { azimuthDeg: 180, altitudeDeg: 5 }).shadowed).toBe(false);
+  });
+
   it('never shadows below the horizon', () => {
     expect(computeShadow(origin, [south], { azimuthDeg: 180, altitudeDeg: -5 }).shadowed).toBe(false);
   });
